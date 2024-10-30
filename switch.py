@@ -6,6 +6,8 @@ import threading
 import time
 from wrapper import recv_from_any_link, send_to_link, get_switch_mac, get_interface_name
 
+mac_table = {}
+
 def parse_ethernet_header(data):
     # Unpack the header fields from the byte array
     #dest_mac, src_mac, ethertype = struct.unpack('!6s6sH', data[:14])
@@ -34,6 +36,13 @@ def send_bdpu_every_sec():
         # TODO Send BDPU every second if necessary
         time.sleep(1)
 
+# checks if the most significant byte is even
+def is_unicast(mac):
+    return int(mac.split(":")[0], 16) % 2 == 0 
+
+def forward_frame(interface, length, data, vlan_id):
+    send_to_link(interface, length, data)
+
 def main():
     # init returns the max interface number. Our interfaces
     # are 0, 1, 2, ..., init_ret value + 1
@@ -58,24 +67,39 @@ def main():
         # b1 = bytes([72, 101, 108, 108, 111])  # "Hello"
         # b2 = bytes([32, 87, 111, 114, 108, 100])  # " World"
         # b3 = b1[0:2] + b[3:4].
-        interface, data, length = recv_from_any_link()
-
+        recv_interface, data, length = recv_from_any_link()
         dest_mac, src_mac, ethertype, vlan_id = parse_ethernet_header(data)
 
-        # Print the MAC src and MAC dst in human readable format
         dest_mac = ':'.join(f'{b:02x}' for b in dest_mac)
         src_mac = ':'.join(f'{b:02x}' for b in src_mac)
 
-        # Note. Adding a VLAN tag can be as easy as
-        # tagged_frame = data[0:12] + create_vlan_tag(10) + data[12:]
-
-        print(f'Destination MAC: {dest_mac}')
         print(f'Source MAC: {src_mac}')
-        print(f'EtherType: {ethertype}')
+        print(f'Destination MAC: {dest_mac}')
+        #print(f'EtherType: {ethertype}')
+        #print("Received frame of size {} on interface {}".format(length, recv_interface), flush=True)
 
-        print("Received frame of size {} on interface {}".format(length, interface), flush=True)
+        print(f'Mac Table: {mac_table}')
+        print()
 
-        # TODO: Implement forwarding with learning
+
+        mac_table[src_mac] = recv_interface
+
+        if is_unicast(dest_mac):
+            # If the interface for the destination mac is known, send the frame
+            if dest_mac in mac_table:
+                forward_frame(mac_table[dest_mac], length, data, vlan_id)
+
+            else:
+                for i in interfaces:
+                    if i != recv_interface:
+                        forward_frame(i, length, data, vlan_id)
+
+        else:
+            for i in interfaces:
+                if i != recv_interface:
+                    forward_frame(i, length, data, vlan_id)
+
+
         # TODO: Implement VLAN support
         # TODO: Implement STP support
 
