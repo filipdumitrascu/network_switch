@@ -9,7 +9,7 @@ from wrapper import recv_from_any_link, send_to_link, get_switch_mac, \
 
 def parse_ethernet_header(data):
     # Unpack the header fields from the byte array
-    #dest_mac, src_mac, ethertype = struct.unpack('!6s6sH', data[:14])
+    # dest_mac, src_mac, ethertype = struct.unpack('!6s6sH', data[:14])
     dest_mac = data[0:6]
     src_mac = data[6:12]
     
@@ -29,14 +29,14 @@ def parse_config_file(sw_id, vlan_table):
     with open(f"./configs/switch{sw_id}.cfg") as fin:
         lines = fin.readlines()
 
-    # first line int the file is the switch priority
+    # First line int the file is the switch priority
     sw_priority = int(lines[0].strip())
 
-    # next ones are "interface vlanid" format 
+    # Next ones are "interface vlanid" format 
     for line in lines[1:]:
         intrf_name, vlan_id = line.strip().split()
 
-        # trunk interfaces
+        # Trunk interfaces
         if vlan_id == 'T':
             vlan_table[intrf_name] = vlan_id
         else:
@@ -49,9 +49,12 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
     recv_name = get_interface_name(recv_intrf)
     was_root = (own_brd_id == root_brd_id)
 
+    # Unpacks the data in the format the bpdu was decided to be stored
     dest_mac, src_mac, bpdu_own_brd_id, bpdu_root_brd_id, \
     bpdu_root_pth_cost = struct.unpack("!6s6sIII", data)
 
+    # The assumed root bridge considered by the bpdu frame is more
+    # appropriate (smaller) than the root bridge considered by the switch
     if bpdu_root_brd_id < root_brd_id:
         root_brd_id = bpdu_root_brd_id
         root_pth_cost = bpdu_root_pth_cost + 10
@@ -59,25 +62,31 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
 
         if was_root:
             for i in intrfs:
+                # All trunk interfaces different from recv are set to blocking
                 i_name = get_interface_name(i)
                 if vlan_table[i_name] == 'T' and i != recv_intrf:
                     intrfs_sts[i_name] = "blocking"
         
+        # The recv interface is set to listening 
         if intrfs_sts[recv_name] == "blocking":
             intrfs_sts[recv_name] = "listening"
 
         bpdu, bpdu_length = create_bpdu(own_brd_id, root_brd_id, root_pth_cost)
         
         for i in intrfs:
+            # A new bpdu is sent on all the other interfaces
             i_name = get_interface_name(i)
             if vlan_table[i_name] == 'T' and i != recv_intrf:
                 if intrfs_sts[i_name] != "blocking":
                     send_to_link(i, bpdu_length, bpdu)
     
+    # The assumed root bridge considered by the bpdu frame is similar
+    # to the one considered by the switch
     elif bpdu_root_brd_id == root_brd_id:
         if recv_intrf == root_intrf and bpdu_root_pth_cost + 10 < root_pth_cost:
             root_pth_cost = bpdu_root_pth_cost + 10
 
+        # If the path cost is better, this interface is a designated one 
         elif recv_intrf != root_intrf:
             if bpdu_root_pth_cost > root_pth_cost:
                 if intrfs_sts[recv_name] != "listening":
@@ -91,11 +100,11 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
             intrfs_sts[get_interface_name(i)] = "listening"
 
 def is_unicast(mac):
-    # checks if the most significant byte is even
+    # Checks if the most significant byte is even
     return int(mac.split(":")[0], 16) % 2 == 0 
 
 def is_bpdu(mac):
-    # checks if the dest mac address identifies a bpdu frame 
+    # Checks if the dest mac address identifies as a bpdu frame 
     return mac == "01:80:c2:00:00:00"
 
 def create_vlan_tag(vlan_id):
@@ -110,6 +119,8 @@ def remove_vlan_tag(length, data):
     return length - 4, data[0:12] + data[16:]
 
 def create_bpdu(own_brd_id, root_brd_id, root_pth_cost): 
+    # In the bpdu data there are stored the following fields:
+    # dest_mac, src_mac, own_brd_id, root_brd_id and root_pth_cost
     bpdu_data = struct.pack("!6s6sIII", b"\x01\x80\xC2\x00\x00\x00",
                             get_switch_mac(), own_brd_id, root_brd_id,
                             root_pth_cost)
@@ -119,6 +130,8 @@ def create_bpdu(own_brd_id, root_brd_id, root_pth_cost):
 def send_bpdu_every_sec(own_brd_id, root_brd_id, root_pth_cost, intrfs,
                         vlan_table):
     while True:
+        # If the switch is the root bridge, it sends
+        # every 1 sec a bpdu on all trunk ports  
         if own_brd_id == root_brd_id:
             bpdu, length = create_bpdu(own_brd_id, root_brd_id, root_pth_cost)
 
@@ -189,9 +202,11 @@ def main():
     t.start()
 
     while True:
+        # data is of type bytes([...]).
         recv_intrf, data, length = recv_from_any_link()
         dest_mac, src_mac, ethertype, vlan_id = parse_ethernet_header(data)
 
+        # human readable format for dest and src macs
         dest_mac = ':'.join(f'{b:02x}' for b in dest_mac)
         src_mac = ':'.join(f'{b:02x}' for b in src_mac)
 
