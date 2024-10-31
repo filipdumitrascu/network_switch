@@ -60,7 +60,6 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
         if was_root:
             for i in intrfs:
                 i_name = get_interface_name(i)
-
                 if vlan_table[i_name] == 'T' and i != recv_intrf:
                     intrfs_sts[i_name] = "blocking"
         
@@ -71,9 +70,9 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
         
         for i in intrfs:
             i_name = get_interface_name(i)
-
             if vlan_table[i_name] == 'T' and i != recv_intrf:
-                send_to_link(i, bpdu_length, bpdu)
+                if intrfs_sts[i_name] != "blocking":
+                    send_to_link(i, bpdu_length, bpdu)
     
     elif bpdu_root_brd_id == root_brd_id:
         if recv_intrf == root_intrf and bpdu_root_pth_cost + 10 < root_pth_cost:
@@ -81,8 +80,8 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
 
         elif recv_intrf != root_intrf:
             if bpdu_root_pth_cost > root_pth_cost:
-                if intrfs_sts[get_interface_name(recv_intrf)] != "listening":
-                    intrfs_sts[get_interface_name(recv_intrf)] == "listening"
+                if intrfs_sts[recv_name] != "listening":
+                    intrfs_sts[recv_name] == "listening"
 
     elif bpdu_own_brd_id == own_brd_id:
         intrfs_sts[recv_name] = "blocking"
@@ -91,7 +90,6 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
         for i in intrfs:
             intrfs_sts[get_interface_name(i)] = "listening"
 
-
 def is_unicast(mac):
     # checks if the most significant byte is even
     return int(mac.split(":")[0], 16) % 2 == 0 
@@ -99,7 +97,6 @@ def is_unicast(mac):
 def is_bpdu(mac):
     # checks if the dest mac address identifies a bpdu frame 
     return mac == "01:80:c2:00:00:00"
-
 
 def create_vlan_tag(vlan_id):
     # 0x8100 for the Ethertype for 802.1Q
@@ -112,14 +109,14 @@ def add_vlan_tag(length, data, vlan_id):
 def remove_vlan_tag(length, data):
     return length - 4, data[0:12] + data[16:]
 
-def create_bpdu(own_brd_id, root_brd_id, root_pth_cost):
-    bpdu_data = struct.pack("01:80:c2:00:00:00", get_switch_mac(), own_brd_id,
-                            root_brd_id, root_pth_cost)
+def create_bpdu(own_brd_id, root_brd_id, root_pth_cost): 
+    bpdu_data = struct.pack("!6s6sIII", b"\x01\x80\xC2\x00\x00\x00",
+                            get_switch_mac(), own_brd_id, root_brd_id,
+                            root_pth_cost)
     
     return bpdu_data, len(bpdu_data)
 
-
-def send_bdpu_every_sec(own_brd_id, root_brd_id, root_pth_cost, intrfs,
+def send_bpdu_every_sec(own_brd_id, root_brd_id, root_pth_cost, intrfs,
                         vlan_table):
     while True:
         if own_brd_id == root_brd_id:
@@ -143,8 +140,8 @@ def forward_frame(dest_intrf, length, data, vlan_id, vlan_table, recv_intrf,
     
     # recv_intrf is access and dest_intrf is trunk
     if vlan_id == -1 and vlan_table[dest_name] == 'T':
-        # if intrfs_sts[dest_name] == "blocking":
-        #     return
+        if intrfs_sts[dest_name] == "blocking":
+            return
         length, data = add_vlan_tag(length, data, vlan_table[recv_name])
 
     # recv_intrf is trunk and dest_intrf is access
@@ -154,9 +151,9 @@ def forward_frame(dest_intrf, length, data, vlan_id, vlan_table, recv_intrf,
         length, data = remove_vlan_tag(length, data)
 
     # recv_intrf and dest_intrf are both trunk
-    # if vlan_id != -1 and vlan_table[dest_name] == 'T':
-    #     if intrfs_sts[dest_name] == "blocking":
-    #         return
+    if vlan_id != -1 and vlan_table[dest_name] == 'T':
+        if intrfs_sts[dest_name] == "blocking":
+            return
 
     send_to_link(dest_intrf, length, data)
 
@@ -185,8 +182,8 @@ def main():
     root_pth_cost = 0
     root_intrf = -1
 
-    # Create and start a new thread that deals with sending BDPU
-    t = threading.Thread(target=send_bdpu_every_sec, 
+    # Create and start a new thread that deals with sending BPDU
+    t = threading.Thread(target=send_bpdu_every_sec, 
                          args=(own_brd_id, root_brd_id, root_pth_cost, intrfs,
                                vlan_table))
     t.start()
