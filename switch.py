@@ -44,10 +44,9 @@ def parse_config_file(sw_id, vlan_table):
     
     return sw_priority
 
-def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
-                     intrfs, intrfs_sts, vlan_table, root_intrf):
+def parse_bpdu_frame(data, recv_intrf, stp, intrfs, intrfs_sts, vlan_table):
     recv_name = get_interface_name(recv_intrf)
-    was_root = (own_brd_id == root_brd_id)
+    was_root = (stp['own_brd_id'] == stp['root_brd_id'])
 
     # Unpacks the data in the format the bpdu was decided to be stored
     dest_mac, src_mac, bpdu_own_brd_id, bpdu_root_brd_id, \
@@ -55,10 +54,10 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
 
     # The assumed root bridge considered by the bpdu frame is more
     # appropriate (smaller) than the root bridge considered by the switch
-    if bpdu_root_brd_id < root_brd_id:
-        root_brd_id = bpdu_root_brd_id
-        root_pth_cost = bpdu_root_pth_cost + 10
-        root_intrf = recv_intrf
+    if bpdu_root_brd_id < stp['root_brd_id']:
+        stp['root_brd_id'] = bpdu_root_brd_id
+        stp['root_pth_cost'] = bpdu_root_pth_cost + 10
+        stp['root_intrf'] = recv_intrf
 
         if was_root:
             for i in intrfs:
@@ -71,7 +70,7 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
         if intrfs_sts[recv_name] == "blocking":
             intrfs_sts[recv_name] = "listening"
 
-        bpdu, bpdu_length = create_bpdu(own_brd_id, root_brd_id, root_pth_cost)
+        bpdu, bpdu_length = create_bpdu(stp)
         
         for i in intrfs:
             # A new bpdu is sent on all the other interfaces
@@ -82,20 +81,21 @@ def parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id, root_pth_cost,
     
     # The assumed root bridge considered by the bpdu frame is similar
     # to the one considered by the switch
-    elif bpdu_root_brd_id == root_brd_id:
-        if recv_intrf == root_intrf and bpdu_root_pth_cost + 10 < root_pth_cost:
-            root_pth_cost = bpdu_root_pth_cost + 10
+    elif bpdu_root_brd_id == stp['root_brd_id']:
+        if recv_intrf == stp['root_intrf']:
+            if bpdu_root_pth_cost + 10 < stp['root_pth_cost']:
+                stp['root_pth_cost'] = bpdu_root_pth_cost + 10
 
         # If the path cost is better, this interface is a designated one 
-        elif recv_intrf != root_intrf:
-            if bpdu_root_pth_cost > root_pth_cost:
+        elif recv_intrf != stp['root_intrf']:
+            if bpdu_root_pth_cost > stp['root_pth_cost']:
                 if intrfs_sts[recv_name] != "listening":
-                    intrfs_sts[recv_name] == "listening"
+                    intrfs_sts[recv_name] = "listening"
 
-    elif bpdu_own_brd_id == own_brd_id:
+    elif bpdu_own_brd_id == stp['own_brd_id']:
         intrfs_sts[recv_name] = "blocking"
 
-    if own_brd_id == root_brd_id:
+    if stp['own_brd_id'] == stp['root_brd_id']:
         for i in intrfs:
             intrfs_sts[get_interface_name(i)] = "listening"
 
@@ -118,22 +118,21 @@ def add_vlan_tag(length, data, vlan_id):
 def remove_vlan_tag(length, data):
     return length - 4, data[0:12] + data[16:]
 
-def create_bpdu(own_brd_id, root_brd_id, root_pth_cost): 
+def create_bpdu(stp): 
     # In the bpdu data there are stored the following fields:
     # dest_mac, src_mac, own_brd_id, root_brd_id and root_pth_cost
     bpdu_data = struct.pack("!6s6sIII", b"\x01\x80\xC2\x00\x00\x00",
-                            get_switch_mac(), own_brd_id, root_brd_id,
-                            root_pth_cost)
+                            get_switch_mac(), stp['own_brd_id'],
+                            stp['root_brd_id'], stp['root_pth_cost'])
     
     return bpdu_data, len(bpdu_data)
 
-def send_bpdu_every_sec(own_brd_id, root_brd_id, root_pth_cost, intrfs,
-                        vlan_table):
+def send_bpdu_every_sec(stp, intrfs, vlan_table):
     while True:
         # If the switch is the root bridge, it sends
         # every 1 sec a bpdu on all trunk ports  
-        if own_brd_id == root_brd_id:
-            bpdu, length = create_bpdu(own_brd_id, root_brd_id, root_pth_cost)
+        if stp['own_brd_id'] == stp['root_brd_id']:
+            bpdu, length = create_bpdu(stp)
 
             for i in intrfs:
                 if vlan_table[get_interface_name(i)] == 'T':
@@ -190,15 +189,16 @@ def main():
         intrfs_sts[i_name] = "listening" if vlan_table[i_name] != 'T' \
             else "blocking"
 
-    own_brd_id = sw_priority
-    root_brd_id = own_brd_id
-    root_pth_cost = 0
-    root_intrf = -1
+    stp = {
+        'own_brd_id': sw_priority,
+        'root_brd_id': sw_priority,
+        'root_pth_cost': 0,
+        'root_intrf': -1
+    }
 
     # Create and start a new thread that deals with sending BPDU
     t = threading.Thread(target=send_bpdu_every_sec, 
-                         args=(own_brd_id, root_brd_id, root_pth_cost, intrfs,
-                               vlan_table))
+                         args=(stp, intrfs, vlan_table))
     t.start()
 
     while True:
@@ -224,9 +224,8 @@ def main():
                                       recv_intrf, intrfs_sts)
 
         elif is_bpdu(dest_mac):
-            parse_bpdu_frame(data, recv_intrf, own_brd_id, root_brd_id,
-                             root_pth_cost, intrfs, intrfs_sts, vlan_table,
-                             root_intrf)
+            parse_bpdu_frame(data, recv_intrf, stp, intrfs, intrfs_sts,
+                             vlan_table)
 
         else: # is broadcast
             for i in intrfs:

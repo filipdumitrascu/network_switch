@@ -61,8 +61,12 @@ switch is a root bridge.
 - On receiving, if the frame is bpdu, (dest_mac == `"01:80:c2:00:00:00"`)
 it is parsed and the trunk interfaces status are updated/maintained.
 - Root interface are considered the interfaces that have the minimal path to
-the root bridge. The root bridge can be updated as requiered, always looking
-for the one with the lowest switch priority. The designated interfaces are the
-ones with importance in order for other switches to send data to the root bridge
-and the last interfaces are the blocked ones. They cause the broadcast storms,
-so there status is set to blocking.
+the root bridge. The designated interfaces are the ones with importance in
+order for other switches to send data to the root bridge and the last
+interfaces are the blocked ones. They cause the broadcast storms, so there
+status is set to blocking.
+- In a mutabale structure (to keep the modified field values outside the
+functions) called stp, are stored the `own_brd_id`, `root_brd_id`,
+`root_pth_cost`, `root_intrf` integeres. This way, the root bridge can be
+updated as requiered, comparing  with the bpdu and looking for the switch with
+the lowest switch priority to update the root bridge.

@@ -30,3 +30,6 @@ clean:
 
 run_switch: all
 	python3 switch.py $(SWITCH_ID) $$(ifconfig -a | grep -o '^[^ :]*' | grep -v 'lo' | tr '\n' ' ')
+
+pack:
+	zip -FSr 333CA_Dumitrascu_FilipTeodor_Tema1RL.zip README.md switch.py
