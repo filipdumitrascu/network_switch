@@ -1,4 +1,3 @@
-1 2 3
 # Network Switch implementation
 ##### Contributor: Dumitrascu Filip-Teodor 333CA
 
